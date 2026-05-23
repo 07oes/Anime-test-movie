@@ -861,8 +861,7 @@ iframe#full-media, iframe#full-media-new {
     display: flex;
 }
 .age-modal-content {
-    background: rgba(30, 30, 30, 0.9);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: hsl(0deg 100% 20%);
     border-radius: 20px;
     width: 85%;
     max-width: 400px;
@@ -872,6 +871,7 @@ iframe#full-media, iframe#full-media-new {
     color: #fff;
 }
 .age-modal-text {
+    font-family: Arial, Helvetica, sans-serif;
     font-size: 18px;
     line-height: 1.5;
     margin-bottom: 25px;
@@ -885,10 +885,10 @@ iframe#full-media, iframe#full-media-new {
     flex: 1; padding: 12px; font-size: 16px; font-weight: bold;
     border-radius: 10px; cursor: pointer; border: none; transition: all 0.2s ease;
 }
-.age-btn-close { background: rgba(255, 255, 255, 0.1); color: #fff; }
-.age-btn-close:hover { background: rgba(255, 255, 255, 0.2); }
-.age-btn-accept { background: #ff453a; color: #fff; }
-.age-btn-accept:hover { background: #ff5e55; }
+.age-btn-close { background: #ff0d002a; color: #fff; }
+.age-btn-close:hover { background: #ff5858; }
+.age-btn-accept { background: #ff0d00; color: #fff; }
+.age-btn-accept:hover { background: #ff5858; }
 
 /* --- Сетка Фан-артов --- */
 .fanart-grid-overlay {
