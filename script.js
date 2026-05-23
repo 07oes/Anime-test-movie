@@ -29,6 +29,8 @@ let fanartCurrentPage = 1;
 let isFetchingFanarts = false;
 let noMoreFanarts = false;
 let globalFanartsMedia = [];
+let globalAnimeYearCache = {}; // Кеш для годов выхода
+let globalAnimeTypeCache = {}; // Кеш для типов аниме
 
 /* ==========================================================================
    ИНИЦИАЛИЗАЦИЯ
@@ -199,16 +201,22 @@ function setupCategoryButtons() {
 /* ==========================================================================
    ЛОГИКА ЭКРАНА ИНФОРМАЦИИ (SPA НАВИГАЦИЯ)
    ========================================================================== */
-async function showAnimeDetails(animeId) {
-    // Запоминаем скролл ТОЛЬКО если переходим с главного экрана (защита при клике на сезоны)
-    if (!document.getElementById('main-view').classList.contains('hidden')) {
-        mainScrollPosition = window.scrollY;
-    }
-    document.getElementById('main-view').classList.add('hidden');
-    document.getElementById('details-view').classList.remove('hidden');
-    window.scrollTo(0, 0); // Прокручиваем в самый верх страницы
-
+async function showAnimeDetails(animeId, passedRelations = [], isRelatedSwitch = false) {
     const container = document.getElementById('anime-detail');
+
+    if (!isRelatedSwitch) {
+        // Запоминаем скролл ТОЛЬКО если переходим с главного экрана
+        if (!document.getElementById('main-view').classList.contains('hidden')) {
+            mainScrollPosition = window.scrollY;
+        }
+        document.getElementById('main-view').classList.add('hidden');
+        document.getElementById('details-view').classList.remove('hidden');
+        window.scrollTo(0, 0); // При открытии нового аниме кидаем в самый верх
+    } else {
+        // Фиксируем высоту, чтобы страница резко не сжималась при появлении надписи "Загрузка..."
+        container.style.minHeight = `${container.offsetHeight}px`;
+    }
+
     container.innerHTML = '<h2 id="loading-text" style="color: white; text-align: center; margin-top: 50px;">Загрузка...</h2>';
     galleryMedia = []; // Очищаем галерею для нового аниме
     currentMediaIndex = 0;
@@ -242,6 +250,7 @@ async function showAnimeDetails(animeId) {
         let screenshots = [];
         let tmdbTrailerId = null; 
         let tmdbSeasonsCount = null; // Переменная для сезонов из TMDB
+        let tmdbSeasonsData = {}; // Данные о количестве серий по сезонам
 
         // Запрос к TMDB
         const TMDB_API_KEY = 'e430e21ae635845f8fc4d7786252a13b'; 
@@ -271,6 +280,15 @@ async function showAnimeDetails(animeId) {
                         // Извлекаем общее количество сезонов
                         if (detailsData.number_of_seasons) {
                             tmdbSeasonsCount = detailsData.number_of_seasons;
+                        }
+
+                        // Извлекаем количество серий для каждого сезона
+                        if (detailsData.seasons) {
+                            detailsData.seasons.forEach(s => {
+                                if (s.season_number > 0) {
+                                    tmdbSeasonsData[s.season_number] = s.episode_count;
+                                }
+                            });
                         }
                     }
                 }
@@ -341,53 +359,6 @@ async function showAnimeDetails(animeId) {
             </div>
         `;
         
-        // --- БЛОК КНОПОК СЕЗОНОВ ---
-        let seasonsWrapper = null;
-        let prequelId = null;
-        let sequelId = null;
-
-        // Ищем реальные связи с другими сезонами
-        if (relationsResult && relationsResult.data) {
-            const prequel = relationsResult.data.find(r => r.relation === 'Prequel');
-            if (prequel && prequel.entry && prequel.entry.length > 0) prequelId = prequel.entry[0].mal_id;
-
-            const sequel = relationsResult.data.find(r => r.relation === 'Sequel');
-            if (sequel && sequel.entry && sequel.entry.length > 0) sequelId = sequel.entry[0].mal_id;
-        }
-
-        if (prequelId || sequelId) {
-            seasonsWrapper = document.createElement('div');
-            seasonsWrapper.className = 'anime-seasons-container';
-            
-            if (prequelId) {
-                const btnPrev = document.createElement('div');
-                btnPrev.className = 'season-btn';
-                btnPrev.textContent = '⬅️ Предыдущий сезон';
-                btnPrev.onclick = () => showAnimeDetails(prequelId); // Перезагружаем страницу новым ID
-                seasonsWrapper.appendChild(btnPrev);
-            }
-
-            const btnCurrent = document.createElement('div');
-            btnCurrent.className = 'season-btn active';
-            btnCurrent.textContent = 'Текущий сезон';
-            seasonsWrapper.appendChild(btnCurrent);
-
-            if (sequelId) {
-                const btnNext = document.createElement('div');
-                btnNext.className = 'season-btn';
-                btnNext.textContent = 'Следующий сезон ➡️';
-                btnNext.onclick = () => showAnimeDetails(sequelId); // Перезагружаем страницу новым ID
-                seasonsWrapper.appendChild(btnNext);
-            }
-
-            // Логика драг-скролла для сезонов (чтобы можно было перетягивать мышкой на ПК)
-            let isSeasonDown = false, seasonStartX, seasonScrollLeft;
-            seasonsWrapper.addEventListener('mousedown', (e) => { isSeasonDown = true; seasonsWrapper.classList.add('is-dragging'); seasonStartX = e.pageX - seasonsWrapper.offsetLeft; seasonScrollLeft = seasonsWrapper.scrollLeft; e.preventDefault(); });
-            seasonsWrapper.addEventListener('mouseleave', () => { isSeasonDown = false; seasonsWrapper.classList.remove('is-dragging'); });
-            seasonsWrapper.addEventListener('mouseup', () => { isSeasonDown = false; seasonsWrapper.classList.remove('is-dragging'); });
-            seasonsWrapper.addEventListener('mousemove', (e) => { if (!isSeasonDown) return; e.preventDefault(); seasonsWrapper.scrollLeft = seasonScrollLeft - (e.pageX - seasonsWrapper.offsetLeft - seasonStartX); });
-        }
-
         let loadedScreenshots = [...new Set(screenshots)];
         let isDown = false, startX, scrollLeft, isDragging = false; 
         const youtubeId = (anime.trailer && anime.trailer.youtube_id) ? anime.trailer.youtube_id : tmdbTrailerId;
@@ -721,7 +692,7 @@ async function showAnimeDetails(animeId) {
         container.appendChild(img);
         container.appendChild(titleElement);
         container.appendChild(metaElement); 
-        if (seasonsWrapper) container.appendChild(seasonsWrapper); // Кнопки сезонов добавляются сверху
+        if (typeof seasonsWrapper !== 'undefined' && seasonsWrapper) container.appendChild(seasonsWrapper); // Кнопки сезонов добавляются сверху
         if (loadedScreenshots.length > 0 || youtubeId) container.appendChild(screenshotsContainer);
         container.appendChild(synopsisElement);
         if (charactersWrapper.innerHTML) container.appendChild(charactersWrapper);
@@ -731,100 +702,258 @@ async function showAnimeDetails(animeId) {
         // --- БЛОК ВИДЕОПЛЕЕРА ---
         const playerWrapper = document.createElement('div');
         playerWrapper.style.width = '100vw';
-        playerWrapper.style.marginTop = '20px'; // Отступ от предыдущего блока
-        playerWrapper.style.paddingBottom = '40px'; // Дополнительный отступ в самом низу страницы для красоты
+        playerWrapper.style.marginTop = '20px'; 
+        playerWrapper.style.paddingBottom = '40px'; 
         
-        playerWrapper.innerHTML = `
+        let playerHTML = `
             <h3 class="section-title">Watch Online</h3>
             <div style="padding: 0 20px; box-sizing: border-box; width: 100vw;">
+        `;
+
+        // Определяем, является ли это фильмом или 1-серийным аниме
+        const isMovie = anime.type === 'Movie' || anime.episodes === 1;
+
+        if (!isMovie) {
+            // Контейнер эпизодов (показываем всегда для сериалов)
+            playerHTML += `<div id="player-episode-buttons" class="player-buttons-container" style="margin-bottom: 15px;"></div>`;
+        }
+
+        playerHTML += `
                 <div id="player-container">
                     <div style="color: #aaaaaa; text-align: center; padding: 20px;">Загрузка плеера...</div>
                 </div>
             </div>
         `;
+        
+        playerWrapper.innerHTML = playerHTML;
         container.appendChild(playerWrapper);
 
-        const loadPlayer = async () => {
+        let currentSelectedEpisode = 1;
+
+        const renderEpisodeButtons = () => {
+            const epContainer = document.getElementById('player-episode-buttons');
+            if (!epContainer) return;
+            
+            // Берем количество серий из текущего загруженного аниме
+            let epCount = anime.episodes || 24;
+
+            let epHTML = '';
+            for (let i = 1; i <= epCount; i++) {
+                const activeClass = i === 1 ? 'active' : '';
+                epHTML += `<button class="player-episode-btn ${activeClass}" data-episode="${i}">ep. ${i}</button>`;
+            }
+            epContainer.innerHTML = epHTML;
+
+            // Обработка кликов по сериям
+            const epBtns = epContainer.querySelectorAll('.player-episode-btn');
+            epBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    epBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentSelectedEpisode = btn.getAttribute('data-episode');
+                    loadPlayer(currentSelectedEpisode);
+                });
+            });
+        };
+
+        // Драг-скролл для серий
+        const epButtonsContainer = document.getElementById('player-episode-buttons');
+        if (epButtonsContainer) {
+            let isEBtnDown = false, eBtnStartX, eBtnScrollLeft;
+            epButtonsContainer.addEventListener('mousedown', (e) => { 
+                isEBtnDown = true; epButtonsContainer.classList.add('is-dragging'); 
+                eBtnStartX = e.pageX - epButtonsContainer.offsetLeft; eBtnScrollLeft = epButtonsContainer.scrollLeft; e.preventDefault(); 
+            });
+            epButtonsContainer.addEventListener('mouseleave', () => { isEBtnDown = false; epButtonsContainer.classList.remove('is-dragging'); });
+            epButtonsContainer.addEventListener('mouseup', () => { isEBtnDown = false; epButtonsContainer.classList.remove('is-dragging'); });
+            epButtonsContainer.addEventListener('mousemove', (e) => { 
+                if (!isEBtnDown) return; e.preventDefault(); 
+                epButtonsContainer.scrollLeft = eBtnScrollLeft - (e.pageX - epButtonsContainer.offsetLeft - eBtnStartX); 
+            });
+        }
+
+        const loadPlayer = async (episode = 1) => {
             const playerContainer = document.getElementById('player-container');
             
-            // Функция включения запасных iframe-плееров, если нативный недоступен
-            const showFallback = () => {
-                playerContainer.innerHTML = `
-                    <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; text-align: center; backdrop-filter: blur(5px);">
-                        <p style="color: #dddddd; font-size: 14px; margin-top: 0; margin-bottom: 15px; line-height: 1.5;">
-                            Встроенный плеер временно недоступен в вашем регионе (блокировка провайдера).<br>
-                            <span style="color: #aaaaaa; font-size: 12px;">Вы можете посмотреть это аниме на партнерских сайтах:</span>
-                        </p>
-                        <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                            <a href="https://animego.org/search/all?q=${encodeURIComponent(anime.title)}" target="_blank" style="background: #2AABEE; color: white; padding: 10px 20px; border-radius: 30px; text-decoration: none; font-weight: bold; font-size: 13px; transition: 0.2s;">
-                                🌐 Смотреть на AnimeGo
-                            </a>
-                            <a href="https://old.yummyani.me/search?q=${encodeURIComponent(anime.title)}" target="_blank" style="background: #E84C3D; color: white; padding: 10px 20px; border-radius: 30px; text-decoration: none; font-weight: bold; font-size: 13px; transition: 0.2s;">
-                                🍣 Смотреть на YummyAnime
-                            </a>
-                        </div>
-                    </div>
-                `;
-            };
-
-            // Пытаемся загрузить нативный плеер Anilibria
-            try {
-                const searchQueries = [anime.title, anime.title_english].filter(Boolean);
-                let animeData = null;
-
-                for (let query of searchQueries) {
-                    const res = await fetch(`https://api.anilibria.tv/v3/title/search?search=${encodeURIComponent(query)}`);
-                    const data = await res.json();
-                    if (data.list && data.list.length > 0) {
-                        animeData = data.list[0];
-                        break;
-                    }
-                }
-                
-                if (animeData && animeData.player && animeData.player.list) {
-                    const firstEpisode = Object.values(animeData.player.list)[0];
-                    const streamUrl = "https://cache.libria.fun" + firstEpisode.hls.hd; 
-                    
-                    playerContainer.innerHTML = `
-                        <video id="native-anime-player" controls style="width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); background: #000;" poster="${img.src}"></video>
-                        <div style="color: #888; font-size: 11px; text-align: center; margin-top: 8px;">
-                            Нативный плеер Anilibria (Без рекламы)
-                        </div>
-                    `;
-                    
-                    const video = document.getElementById('native-anime-player');
-                    
-                    const initHls = () => {
-                        if (Hls.isSupported()) {
-                            const hls = new Hls();
-                            hls.loadSource(streamUrl);
-                            hls.attachMedia(video);
-                        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                            video.src = streamUrl;
-                        }
-                    };
-
-                    if (typeof Hls === 'undefined') {
-                        const script = document.createElement('script');
-                        script.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest';
-                        script.onload = initHls;
-                        document.head.appendChild(script);
-                    } else {
-                        initHls();
-                    }
-                } else {
-                    showFallback();
-                }
-            } catch (e) {
-                showFallback();
-            }
+            // Встраиваем плеер Kodik. Параметр season убран, так как ID аниме (shikimoriID) уже соответствует конкретному сезону.
+            playerContainer.innerHTML = `
+                <div style="display: flex; justify-content: center;">
+                    <iframe src="//kodikplayer.com/find-player?shikimoriID=${animeId}&episode=${episode}&hide_selectors=true" style="width: 85%; max-width: 800px; aspect-ratio: 16 / 9; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); background: #000; border: none;" allowfullscreen allow="autoplay *; fullscreen *"></iframe>
+                </div>
+            `;
         };
         
-        loadPlayer();
+        // Инициализация при загрузке
+        if (!isMovie) {
+            renderEpisodeButtons();
+        }
+        loadPlayer(1);
+
+        // ДОБАВЛЯЕМ СПИСОК СВЯЗАННОГО АНИМЕ СНИЗУ ПЛЕЕРА
+        const hasRelations = (relationsResult && relationsResult.data && relationsResult.data.length > 0) || (passedRelations && passedRelations.length > 0);
+        
+        if (hasRelations) {
+            const relationsWrapper = document.createElement('div');
+            relationsWrapper.style.width = '100vw';
+            relationsWrapper.style.paddingBottom = '40px';
+            
+            let relatedQueue = []; // Очередь для фоновой подгрузки годов
+            
+            // Ограничиваем ширину (максимум 800px) и центрируем список
+            let relHTML = `<div style="max-width: 800px; margin: 0 auto; padding: 0 20px; box-sizing: border-box;">`;
+            relHTML += `<div class="related-list-container">`;
+            relHTML += `<div class="related-list-header">chronology</div>`;
+            
+            let combinedMap = new Map();
+            
+            // 1. Копируем переданную историю
+            if (passedRelations && passedRelations.length > 0) {
+                passedRelations.forEach(r => combinedMap.set(r.mal_id, { ...r, isCurrent: false }));
+            }
+            
+            // 2. Добавляем новые связи от текущего аниме
+            if (relationsResult && relationsResult.data) {
+                relationsResult.data.forEach(rel => {
+                    const relType = rel.relation;
+                    rel.entry.forEach(ent => {
+                        if (ent.type === 'anime') {
+                            if (!combinedMap.has(ent.mal_id)) {
+                                combinedMap.set(ent.mal_id, { mal_id: ent.mal_id, name: ent.name, relation: relType, isCurrent: false });
+                            } else {
+                                // Перезаписываем тип на более точный, если API его выдал
+                                let existing = combinedMap.get(ent.mal_id);
+                                if (['Prequel', 'Sequel'].includes(relType) || existing.relation === 'Franchise') {
+                                    existing.relation = relType;
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+            
+            // 3. Добавляем/обновляем текущее аниме
+            let currentYear = anime.year || (anime.aired && anime.aired.from ? new Date(anime.aired.from).getFullYear() : 'TBA');
+            globalAnimeYearCache[anime.mal_id] = currentYear; // сохраняем сразу в кеш
+            globalAnimeTypeCache[anime.mal_id] = anime.type; // сохраняем тип
+            combinedMap.set(anime.mal_id, { mal_id: anime.mal_id, name: anime.title, relation: 'CURRENT', isCurrent: true, year: currentYear });
+            
+            // 4. Сортируем
+            let unifiedList = Array.from(combinedMap.values());
+            
+            unifiedList.sort((a, b) => {
+                let yearA = globalAnimeYearCache[a.mal_id] || 9999;
+                let yearB = globalAnimeYearCache[b.mal_id] || 9999;
+                if (yearA === 'TBA') yearA = 9998;
+                if (yearB === 'TBA') yearB = 9998;
+                
+                if (yearA !== yearB && yearA !== 9999 && yearB !== 9999) {
+                    return yearA - yearB;
+                }
+                return a.mal_id - b.mal_id; // По умолчанию сортируем по ID (он почти всегда хронологичен)
+            });
+            
+            // Подготавливаем состояние для передачи в следующий клик
+            const nextListState = unifiedList.map(u => ({
+                ...u, 
+                isCurrent: false,
+                relation: u.relation === 'CURRENT' ? 'Franchise' : u.relation
+            }));
+            
+            unifiedList.forEach((ent, index) => {
+                if (!ent.isCurrent && !globalAnimeYearCache[ent.mal_id]) relatedQueue.push(ent.mal_id); 
+                const activeClass = ent.isCurrent ? ' current-item' : '';
+                const yearText = ent.isCurrent ? ent.year : (globalAnimeYearCache[ent.mal_id] || '...');
+                
+                let displayType = 'Collection';
+                if (globalAnimeTypeCache[ent.mal_id]) {
+                    displayType = globalAnimeTypeCache[ent.mal_id] === 'Movie' ? 'Movie' : 'Collection';
+                } else if (ent.name.toLowerCase().includes('movie')) {
+                    displayType = 'Movie';
+                }
+
+                relHTML += `
+                    <div class="related-item${activeClass}" data-id="${ent.mal_id}">
+                        <div class="related-content-wrapper">
+                            <div class="related-number">${index + 1}</div>
+                            <div class="related-left">
+                                <div class="related-type" id="type-${ent.mal_id}">${displayType}</div>
+                                <div class="related-name">${ent.name}</div>
+                            </div>
+                        </div>
+                        <div class="related-year" id="year-${ent.mal_id}">${yearText}</div>
+                    </div>
+                `;
+            });
+            
+            relHTML += `</div></div>`;
+            relationsWrapper.innerHTML = relHTML;
+            container.appendChild(relationsWrapper);
+            
+            const relatedItems = relationsWrapper.querySelectorAll('.related-item');
+            relatedItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    if (item.classList.contains('current-item')) return; // Блокируем клик по текущему сезону
+                    const targetId = item.getAttribute('data-id');
+                    showAnimeDetails(targetId, nextListState, true); // Передаем накопленный список и флаг переключения
+                });
+            });
+
+            // Фоновая загрузка годов релиза
+            const fetchYears = async () => {
+                for (let id of relatedQueue) {
+                    // Если пользователь ушел со страницы — прерываем загрузку
+                    if (document.getElementById('details-view').classList.contains('hidden') || !document.getElementById(`year-${id}`)) break;
+                    
+                    if (globalAnimeYearCache[id]) {
+                        const yearEl = document.getElementById(`year-${id}`);
+                        if (yearEl) yearEl.textContent = globalAnimeYearCache[id];
+                        continue;
+                    }
+                    
+                    try {
+                        await new Promise(r => setTimeout(r, 450)); // Ограничение API (3 запроса в сек)
+                        const res = await fetch(`https://api.jikan.moe/v4/anime/${id}`);
+                        if (res.ok) {
+                            const data = await res.json();
+                            const yearEl = document.getElementById(`year-${id}`);
+                            if (yearEl && data.data) {
+                                let year = data.data.year;
+                                // Если точного года нет, пытаемся достать его из полной даты aired
+                                if (!year && data.data.aired && data.data.aired.from) {
+                                    year = new Date(data.data.aired.from).getFullYear();
+                                }
+                                const finalYear = year || 'TBA';
+                                globalAnimeYearCache[id] = finalYear; // Сохраняем в кэш
+                                yearEl.textContent = finalYear;
+                                
+                                globalAnimeTypeCache[id] = data.data.type;
+                                const typeEl = document.getElementById(`type-${id}`);
+                                if (typeEl) {
+                                    typeEl.textContent = data.data.type === 'Movie' ? 'Movie' : 'Collection';
+                                }
+                            }
+                        }
+                    } catch (e) {}
+                }
+            };
+            fetchYears();
+        }
+
+        // После успешной загрузки сбрасываем фиксированную высоту
+        container.style.minHeight = 'auto';
+        
+        // Если это было переключение из хронологии, плавно скроллим к плееру
+        if (isRelatedSwitch) {
+            const scrollTarget = document.getElementById('player-container');
+            if (scrollTarget) scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
 
     } catch (error) {
         console.error(error);
-        container.innerHTML = `<h2 style="color:white; text-align:center;">Ошибка сервера</h2><button class="btn" style="margin-top:20px;" onclick="closeAnimeDetails()">Назад</button>`;
+        container.style.minHeight = 'auto'; // Сбрасываем высоту при ошибке
+        container.innerHTML = `<h2 style="color:red; text-align:center;">Ошибка: ${error.message}</h2>
+                               <pre style="color:white; white-space:pre-wrap; padding:20px;">${error.stack}</pre>
+                               <button class="btn" style="margin-top:20px;" onclick="closeAnimeDetails()">Назад</button>`;
     }
 }
 
@@ -1227,26 +1356,4 @@ async function loadMoreFanarts() {
     }
 }
 
-function setupFanartGridListeners() {
-    const gridModal = document.getElementById('fanart-grid-modal');
-    const closeBtn = document.getElementById('close-fanart-grid');
-    const gridContainer = document.getElementById('fanart-grid-container');
-
-    const closeGridModal = () => {
-        gridModal.classList.remove('show');
-        if (!document.getElementById('image-modal').classList.contains('show') && !document.getElementById('music-modal').classList.contains('show')) {
-            document.body.style.overflowY = 'auto';
-        }
-    };
-
-    closeBtn.addEventListener('click', closeGridModal);
-    gridModal.addEventListener('click', (e) => { if (e.target === gridModal) closeGridModal(); });
-    
-    // Бесконечный скролл: отслеживаем прокрутку внутри сетки
-    gridContainer.addEventListener('scroll', () => {
-        // Если осталось менее 300 пикселей до конца прокрутки сетки
-        if (gridContainer.scrollTop + gridContainer.clientHeight >= gridContainer.scrollHeight - 300) {
-            loadMoreFanarts();
-        }
-    });
-}
+function setupFanartGridListeners() { const gridModal = document.getElementById('fanart-grid-modal'); const closeBtn = document.getElementById('close-fanart-grid'); const gridContainer = document.getElementById('fanart-grid-container'); const closeGridModal = () => { gridModal.classList.remove('show'); if (!document.getElementById('image-modal').classList.contains('show') && !document.getElementById('music-modal').classList.contains('show')) { document.body.style.overflowY = 'auto'; } }; closeBtn.addEventListener('click', closeGridModal); gridModal.addEventListener('click', (e) => { if (e.target === gridModal) closeGridModal(); }); gridContainer.addEventListener('scroll', () => { if (gridContainer.scrollTop + gridContainer.clientHeight >= gridContainer.scrollHeight - 300) { loadMoreFanarts(); } }); }
